@@ -121,6 +121,52 @@ class BacBoScraper:
                     raise ValueError("ChromeDriverManager.install() returned None")
                 
                 original_path = driver_path
+                logger.info(f"ChromeDriverManager returned path: {driver_path}")
+                
+                # Fix path resolution: ChromeDriverManager sometimes returns wrong file or directory
+                # Check if it's the wrong file (like THIRD_PARTY_NOTICES.chromedriver)
+                if os.path.isfile(driver_path):
+                    filename = os.path.basename(driver_path)
+                    # If it's the wrong file, look in the same directory for the actual executable
+                    if 'NOTICES' in filename or filename.endswith('.txt') or filename.endswith('.md'):
+                        logger.warning(f"ChromeDriverManager returned wrong file: {filename}, searching for executable...")
+                        # First, check the same directory (most common case)
+                        same_dir = os.path.dirname(driver_path)
+                        chromedriver_path = os.path.join(same_dir, 'chromedriver')
+                        if os.path.isfile(chromedriver_path):
+                            try:
+                                os.chmod(chromedriver_path, 0o755)
+                                driver_path = chromedriver_path
+                                logger.info(f"Found chromedriver executable in same directory: {driver_path}")
+                            except Exception as e:
+                                logger.warning(f"Could not use chromedriver from same directory: {e}")
+                        
+                        # If not found in same directory, search more broadly
+                        if driver_path == original_path:
+                            search_dirs = [
+                                same_dir,  # Same directory
+                                os.path.dirname(same_dir),  # Parent directory
+                            ]
+                            for search_dir in search_dirs:
+                                if os.path.isdir(search_dir):
+                                    # Look for chromedriver executable
+                                    for root, dirs, files in os.walk(search_dir):
+                                        for file in files:
+                                            if file == 'chromedriver' and 'NOTICES' not in file:
+                                                full_path = os.path.join(root, file)
+                                                if os.path.isfile(full_path):
+                                                    try:
+                                                        os.chmod(full_path, 0o755)
+                                                        driver_path = full_path
+                                                        logger.info(f"Found chromedriver executable at: {driver_path}")
+                                                        break
+                                                    except Exception as e:
+                                                        logger.debug(f"Could not use {full_path}: {e}")
+                                                        continue
+                                        if driver_path != original_path:
+                                            break
+                                    if driver_path != original_path:
+                                        break
                 
                 # Fix path resolution: ChromeDriverManager sometimes returns a directory path
                 # We need to find the actual chromedriver executable
@@ -142,7 +188,7 @@ class BacBoScraper:
                         for root, dirs, files in os.walk(driver_path):
                             for file in files:
                                 # Skip non-executable files like THIRD_PARTY_NOTICES
-                                if file == 'chromedriver' or (file.startswith('chromedriver') and not file.endswith('.txt') and not file.endswith('.md') and not 'NOTICES' in file):
+                                if file == 'chromedriver' and 'NOTICES' not in file:
                                     full_path = os.path.join(root, file)
                                     if os.path.isfile(full_path):
                                         # Try to make it executable and check
@@ -153,7 +199,8 @@ class BacBoScraper:
                                                 logger.info(f"Found chromedriver executable at: {driver_path}")
                                                 found_executable = True
                                                 break
-                                        except:
+                                        except Exception as e:
+                                            logger.debug(f"Could not make {full_path} executable: {e}")
                                             continue
                             if found_executable:
                                 break
@@ -162,8 +209,30 @@ class BacBoScraper:
                     if os.path.isdir(driver_path):
                         raise ValueError(f"ChromeDriverManager returned directory but chromedriver executable not found: {original_path}")
                 
-                # Make sure the file is executable (important for Linux)
+                # Final validation: make sure it's the actual executable file
                 if os.path.isfile(driver_path):
+                    # Check if it's the wrong file
+                    filename = os.path.basename(driver_path)
+                    if 'NOTICES' in filename or filename.endswith('.txt') or filename.endswith('.md'):
+                        # Still wrong file, search more thoroughly
+                        search_dir = os.path.dirname(driver_path)
+                        logger.warning(f"Path still points to wrong file, searching in: {search_dir}")
+                        for root, dirs, files in os.walk(search_dir):
+                            for file in files:
+                                if file == 'chromedriver' and 'NOTICES' not in file:
+                                    full_path = os.path.join(root, file)
+                                    if os.path.isfile(full_path):
+                                        try:
+                                            os.chmod(full_path, 0o755)
+                                            driver_path = full_path
+                                            logger.info(f"Found correct chromedriver executable at: {driver_path}")
+                                            break
+                                        except:
+                                            continue
+                            if 'NOTICES' not in os.path.basename(driver_path):
+                                break
+                    
+                    # Make sure the file is executable (important for Linux)
                     os.chmod(driver_path, 0o755)
                     logger.info(f"Using chromedriver at: {driver_path}")
                 else:
