@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.venv
+
+# Testing
+test_*.py
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Git
+.git/
+.gitignore
+
+# Documentation
+*.md
+!README.md
+
+# Railway/Vercel config (not needed in Docker)
+.vercelignore
+vercel.json
+railway_setup.sh
+setup_chrome.sh
+
+# Diagnostic files
+diagnose_page.py
+fix_chromedriver.py
+
