@@ -30,6 +30,7 @@ Thumbs.db
 # Documentation
 *.md
 !README.md
+!RAILWAY_DEPLOYMENT.md
 
 # Railway/Vercel config (not needed in Docker)
 .vercelignore
