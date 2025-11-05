@@ -1,0 +1,17 @@
+# Nixpacks configuration for Railway
+# This ensures Chrome is installed during build
+
+[phases.setup]
+nixPkgs = ["python39", "chromium", "chromedriver"]
+
+[phases.install]
+cmds = [
+  "pip install -r requirements.txt"
+]
+
+[phases.build]
+cmds = []
+
+[start]
+cmd = "python app_ui.py"
+

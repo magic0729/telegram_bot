@@ -58,6 +58,23 @@ class BacBoScraper:
         chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
         chrome_options.add_experimental_option('useAutomationExtension', False)
         chrome_options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
+        
+        # Additional options for Railway/Linux environments
+        if platform.system() != 'Windows':
+            chrome_options.add_argument('--disable-gpu')
+            chrome_options.add_argument('--remote-debugging-port=9222')
+            # Try to use Chrome binary if available in common locations
+            chrome_binary_paths = [
+                '/usr/bin/google-chrome',
+                '/usr/bin/chromium-browser',
+                '/usr/bin/chromium',
+                '/snap/bin/chromium'
+            ]
+            for binary_path in chrome_binary_paths:
+                if os.path.exists(binary_path):
+                    chrome_options.binary_location = binary_path
+                    logger.info(f"Found Chrome binary at: {binary_path}")
+                    break
 
         # 1) Try Selenium Manager (no driver path) - this auto-downloads the
         # correct driver for the installed browser and OS.
@@ -73,14 +90,61 @@ class BacBoScraper:
         try:
             if platform.system() == 'Windows':
                 os.environ['WDM_OS_TYPE'] = 'win64'
-            driver_path = ChromeDriverManager().install()
+            else:
+                # For Linux/Railway, try to set Chrome version explicitly to avoid version detection issues
+                try:
+                    import subprocess
+                    # Try to get Chrome version
+                    for binary_path in ['/usr/bin/google-chrome', '/usr/bin/chromium-browser', '/usr/bin/chromium']:
+                        if os.path.exists(binary_path):
+                            result = subprocess.run([binary_path, '--version'], capture_output=True, text=True, timeout=5)
+                            if result.returncode == 0 and result.stdout:
+                                version_str = result.stdout.strip()
+                                logger.info(f"Detected Chrome version: {version_str}")
+                                # Extract version number (e.g., "Google Chrome 120.0.6099.109" -> "120.0.6099.109")
+                                import re
+                                version_match = re.search(r'(\d+\.\d+\.\d+\.\d+)', version_str)
+                                if version_match:
+                                    chrome_version = version_match.group(1)
+                                    # Set ChromeDriver version to match major version
+                                    major_version = chrome_version.split('.')[0]
+                                    os.environ['WDM_CHROMEDRIVER_VERSION'] = major_version
+                                    logger.info(f"Setting ChromeDriver version to: {major_version}")
+                            break
+                except Exception as version_error:
+                    logger.warning(f"Could not detect Chrome version: {version_error}")
+            
+            # Install ChromeDriver with error handling
+            try:
+                driver_path = ChromeDriverManager().install()
+                if driver_path is None:
+                    raise ValueError("ChromeDriverManager.install() returned None")
+            except AttributeError as attr_error:
+                if "'NoneType' object has no attribute 'split'" in str(attr_error):
+                    logger.error("ChromeDriverManager failed to detect Chrome version. This usually means Chrome is not installed.")
+                    raise RuntimeError(
+                        "Chrome/Chromium is not installed or not found. "
+                        "On Railway, you may need to install Chrome in your build process. "
+                        "Error: ChromeDriverManager could not detect Chrome version."
+                    ) from attr_error
+                raise
+            except Exception as install_error:
+                if "'NoneType' object has no attribute 'split'" in str(install_error):
+                    logger.error("ChromeDriverManager failed to detect Chrome version. This usually means Chrome is not installed.")
+                    raise RuntimeError(
+                        "Chrome/Chromium is not installed or not found. "
+                        "On Railway, you may need to install Chrome in your build process. "
+                        "Error: ChromeDriverManager could not detect Chrome version."
+                    ) from install_error
+                raise
+            
             service = Service(driver_path)
             self.driver = webdriver.Chrome(service=service, options=chrome_options)
             self.driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
             logger.info("Using webdriver-manager fallback for ChromeDriver")
             return
         except Exception as e:
-            logger.error(f"webdriver-manager fallback failed: {e}")
+            logger.error(f"webdriver-manager fallback failed: {e}", exc_info=True)
             raise
         
     def _switch_language(self, target_language: str):
@@ -505,6 +569,11 @@ class BacBoScraper:
                 logger.info("Extracting text from screenshot using OCR...")
                 ocr_text = pytesseract.image_to_string(image, lang='eng')
                 
+                # Check if OCR returned None or empty
+                if ocr_text is None:
+                    logger.warning("OCR returned None, skipping OCR extraction")
+                    return None
+                
                 logger.debug(f"OCR extracted text length: {len(ocr_text)} characters")
                 logger.debug(f"OCR text sample: {ocr_text[:500]}")
                 
@@ -522,7 +591,7 @@ class BacBoScraper:
                 ocr_upper = ocr_text.upper()
                 
                 # Look for percentages near keywords
-                lines = ocr_text.split('\n')
+                lines = ocr_text.split('\n') if ocr_text else []
                 for line in lines:
                     line_upper = line.upper()
                     
