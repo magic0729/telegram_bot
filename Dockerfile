@@ -1,11 +1,14 @@
 # Dockerfile for Railway deployment with Chrome
 FROM python:3.10-slim
 
-# Install system dependencies, Chrome, and Tesseract OCR
+# Install system dependencies first (including gnupg for GPG operations)
 RUN apt-get update && apt-get install -y \
     wget \
     gnupg \
-    ca-certificates \
+    ca-certificates
+
+# Install Chrome dependencies and Chrome itself
+RUN apt-get update && apt-get install -y \
     fonts-liberation \
     libasound2 \
     libatk-bridge2.0-0 \
@@ -23,8 +26,10 @@ RUN apt-get update && apt-get install -y \
     libxkbcommon0 \
     libxrandr2 \
     xdg-utils \
-    tesseract-ocr \
-    && mkdir -p /etc/apt/keyrings \
+    tesseract-ocr
+
+# Add Google Chrome repository using modern method
+RUN mkdir -p /etc/apt/keyrings \
     && wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | gpg --dearmor -o /etc/apt/keyrings/google-chrome.gpg \
     && echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/google-chrome.gpg] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list \
     && apt-get update \
