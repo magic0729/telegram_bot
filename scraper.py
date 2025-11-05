@@ -119,6 +119,56 @@ class BacBoScraper:
                 driver_path = ChromeDriverManager().install()
                 if driver_path is None:
                     raise ValueError("ChromeDriverManager.install() returned None")
+                
+                original_path = driver_path
+                
+                # Fix path resolution: ChromeDriverManager sometimes returns a directory path
+                # We need to find the actual chromedriver executable
+                if os.path.isdir(driver_path):
+                    # Look for chromedriver executable in the directory
+                    possible_paths = [
+                        os.path.join(driver_path, 'chromedriver'),
+                        os.path.join(driver_path, 'chromedriver-linux64', 'chromedriver'),
+                        os.path.join(driver_path, 'chromedriver-linux', 'chromedriver'),
+                    ]
+                    for path in possible_paths:
+                        if os.path.isfile(path) and os.access(path, os.X_OK):
+                            driver_path = path
+                            logger.info(f"Found chromedriver executable at: {driver_path}")
+                            break
+                    else:
+                        # If not found, try to find any executable named chromedriver
+                        found_executable = False
+                        for root, dirs, files in os.walk(driver_path):
+                            for file in files:
+                                # Skip non-executable files like THIRD_PARTY_NOTICES
+                                if file == 'chromedriver' or (file.startswith('chromedriver') and not file.endswith('.txt') and not file.endswith('.md') and not 'NOTICES' in file):
+                                    full_path = os.path.join(root, file)
+                                    if os.path.isfile(full_path):
+                                        # Try to make it executable and check
+                                        try:
+                                            os.chmod(full_path, 0o755)
+                                            if os.access(full_path, os.X_OK):
+                                                driver_path = full_path
+                                                logger.info(f"Found chromedriver executable at: {driver_path}")
+                                                found_executable = True
+                                                break
+                                        except:
+                                            continue
+                            if found_executable:
+                                break
+                    
+                    # If still a directory, raise error
+                    if os.path.isdir(driver_path):
+                        raise ValueError(f"ChromeDriverManager returned directory but chromedriver executable not found: {original_path}")
+                
+                # Make sure the file is executable (important for Linux)
+                if os.path.isfile(driver_path):
+                    os.chmod(driver_path, 0o755)
+                    logger.info(f"Using chromedriver at: {driver_path}")
+                else:
+                    raise ValueError(f"ChromeDriver path is not a valid file: {driver_path}")
+                    
             except AttributeError as attr_error:
                 if "'NoneType' object has no attribute 'split'" in str(attr_error):
                     logger.error("ChromeDriverManager failed to detect Chrome version. This usually means Chrome is not installed.")
