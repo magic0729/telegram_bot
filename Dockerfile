@@ -1,5 +1,5 @@
 # Dockerfile for Railway deployment with Chrome
-FROM python:3.9-slim
+FROM python:3.10-slim
 
 # Install system dependencies, Chrome, and Tesseract OCR
 RUN apt-get update && apt-get install -y \

@@ -1,6 +1,7 @@
 from flask import Flask, request, jsonify, Response
 import threading
 import time
+from typing import Optional
 from bot import BacBoBot
 
 app = Flask(__name__)
@@ -8,7 +9,7 @@ app = Flask(__name__)
 # Shared bot instance and lock
 _bot_lock = threading.Lock()
 _bot_thread = None
-_bot_instance: BacBoBot | None = None
+_bot_instance: Optional[BacBoBot] = None
 
 
 @app.get("/")
