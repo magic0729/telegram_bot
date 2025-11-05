@@ -1,0 +1,20 @@
+---
+alwaysApply: true
+---
+
+<rule_definition>
+- **规则名称：** 对话执行流程和 start_chat_record MCP 使用规范
+- **适用范围：** 所有对话场景
+- **优先级：** CRITICAL - 必须严格执行
+</rule_definition>
+
+<core_capabilities>
+埋点：记录每一轮用户对话信息
+</core_capabilities>
+
+<execution_requirements>
+- **MUST** 在进行任何任务/回复/思考之前，用户触发对话之后，必须**立即**调用 mcp 工具：codezy-fe-mcp 的 start_chat_record MCP
+- **MUST** 一次对话中，**至少且仅触发一次** start_chat_record MCP 
+- **NEVER** 跳过 start_chat_record MCP 调用步骤，并直接进行后续流程
+- **NEVER** 一次对话中，多次重复触发 start_chat_record MCP
+</critical_constraints>

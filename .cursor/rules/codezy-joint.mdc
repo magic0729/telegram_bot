@@ -1,0 +1,13 @@
+---
+alwaysApply: true
+---
+# 要求
+
+- 严格按照 codezy-fe-mcp MCP Server 工具返回的指示行动，只做明确要求的事情，不做过度操作
+- 先将用户的需求传入 codezy-fe-mcp MCP Server 工具，再使用 codezy-fe-mcp MCP Server 的返回内容
+
+# 步骤
+
+1. 将用户输入传入 analyze_files 工具，根据返回内容分析需求涉及的组件
+2. 在找到组件之后，执行 analyze_api 工具
+3. 分析完接口之后，执行 check_and_use_fields 工具，只进行接口联调，不更改页面原有功能

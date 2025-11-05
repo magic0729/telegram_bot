@@ -28,21 +28,25 @@ logger = logging.getLogger(__name__)
 class BacBoBot:
     """Main bot class for monitoring Bac Bo game"""
     
-    def __init__(self):
+    def __init__(self, token: Optional[str] = None, chat_id: Optional[str] = None):
         self.scraper = BacBoScraper(
             url=BAC_BO_URL,
             headless=HEADLESS,
             wait_timeout=WAIT_TIMEOUT
         )
+        # Allow overriding credentials at runtime
+        bot_token = token or TELEGRAM_BOT_TOKEN
+        bot_chat_id = chat_id or TELEGRAM_CHAT_ID
         self.telegram_bot = BacBoTelegramBot(
-            token=TELEGRAM_BOT_TOKEN,
-            chat_id=TELEGRAM_CHAT_ID
+            token=bot_token,
+            chat_id=bot_chat_id
         )
         self.language = DEFAULT_LANGUAGE
         self.last_stats = None
         self.last_alert_time = 0
         self.alert_cooldown = 30  # seconds between alerts
         self.last_stats_sent = None  # Track last stats sent to Telegram
+        self._stop = False
         
     def _should_send_alert(self, stats: dict) -> bool:
         """Determine if we should send an alert based on stats"""
@@ -181,7 +185,7 @@ class BacBoBot:
         status_update_interval = 30  # Send status update every 30 seconds
         
         try:
-            while True:
+            while not self._stop:
                 iteration_count += 1
                 current_time = time.time()
                 
@@ -256,6 +260,19 @@ class BacBoBot:
                 logger.error(f"Error closing scraper: {e}")
             
             logger.info("Bot shutdown complete")
+
+    def stop(self):
+        """Signal the bot to stop gracefully"""
+        self._stop = True
+
+    def status(self) -> dict:
+        """Return a lightweight status snapshot"""
+        return {
+            'running': not self._stop,
+            'last_stats': self.last_stats or {},
+            'alert_threshold': PLAYER_WIN_THRESHOLD,
+            'scrape_interval': SCRAPE_INTERVAL
+        }
 
 
 def main():
