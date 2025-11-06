@@ -25,8 +25,13 @@ RUN apt-get update && apt-get install -y \
     libxfixes3 \
     libxkbcommon0 \
     libxrandr2 \
+    libxshmfence1 \
+    libxss1 \
+    libu2f-udev \
     xdg-utils \
-    tesseract-ocr
+    tesseract-ocr \
+    tesseract-ocr-eng \
+    tesseract-ocr-por
 
 # Add Google Chrome repository using modern method
 RUN mkdir -p /etc/apt/keyrings \

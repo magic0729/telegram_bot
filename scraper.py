@@ -50,8 +50,11 @@ class BacBoScraper:
         only if Selenium Manager is unavailable.
         """
         chrome_options = Options()
-        if self.headless:
-            chrome_options.add_argument('--headless')
+        # Auto-enable headless mode if DISPLAY is not set (containerized environments)
+        effective_headless = self.headless or (platform.system() != 'Windows' and not os.environ.get('DISPLAY'))
+        if effective_headless:
+            # Use new headless mode (Chrome 109+)
+            chrome_options.add_argument('--headless=new')
         chrome_options.add_argument('--no-sandbox')
         chrome_options.add_argument('--disable-dev-shm-usage')
         chrome_options.add_argument('--disable-blink-features=AutomationControlled')
@@ -62,7 +65,19 @@ class BacBoScraper:
         # Additional options for Railway/Linux environments
         if platform.system() != 'Windows':
             chrome_options.add_argument('--disable-gpu')
+            chrome_options.add_argument('--disable-setuid-sandbox')  # Required when running as root
+            chrome_options.add_argument('--disable-software-rasterizer')
+            chrome_options.add_argument('--disable-extensions')
+            chrome_options.add_argument('--disable-background-timer-throttling')
+            chrome_options.add_argument('--disable-backgrounding-occluded-windows')
+            chrome_options.add_argument('--disable-renderer-backgrounding')
+            chrome_options.add_argument('--disable-features=TranslateUI')
+            chrome_options.add_argument('--disable-ipc-flooding-protection')
             chrome_options.add_argument('--remote-debugging-port=9222')
+            chrome_options.add_argument('--window-size=1920,1080')
+            chrome_options.add_argument('--start-maximized')
+            # Set up Chrome to run in containerized environment
+            chrome_options.add_argument('--disable-features=VizDisplayCompositor')
             # Try to use Chrome binary if available in common locations
             chrome_binary_paths = [
                 '/usr/bin/google-chrome',
