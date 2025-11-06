@@ -354,8 +354,29 @@ class BacBoScraper:
                 
                 logger.info("Page loaded successfully")
                 
+                # Wait for JavaScript to finish executing
+                try:
+                    WebDriverWait(self.driver, 20).until(
+                        lambda d: d.execute_script('return jQuery.active == 0') if d.execute_script('return typeof jQuery !== "undefined"') else True
+                    )
+                    logger.info("JavaScript execution completed")
+                except:
+                    logger.debug("jQuery check failed or not using jQuery, continuing...")
+                
                 # Wait additional time for dynamic content
                 time.sleep(10)  # Increased wait time for dynamic content
+                
+                # Execute JavaScript to trigger any lazy-loaded content
+                try:
+                    self.driver.execute_script("""
+                        // Scroll to trigger lazy loading
+                        window.scrollTo(0, document.body.scrollHeight);
+                        setTimeout(() => window.scrollTo(0, 0), 1000);
+                    """)
+                    time.sleep(3)
+                    logger.info("Triggered lazy loading by scrolling")
+                except Exception as scroll_error:
+                    logger.debug(f"Could not trigger lazy loading: {scroll_error}")
                 
                 # Verify page actually loaded by checking title or URL
                 current_url = self.driver.current_url
@@ -366,6 +387,34 @@ class BacBoScraper:
                 page_text = self.driver.find_element(By.TAG_NAME, "body").text[:500]
                 if 'error' in page_text.lower() and '404' in page_text.lower():
                     raise Exception(f"Page returned error: {page_text[:200]}")
+                
+                # Try to handle cookie consent if present
+                try:
+                    cookie_selectors = [
+                        "button[id*='cookie']",
+                        "button[class*='cookie']",
+                        "button[class*='accept']",
+                        "button[id*='accept']",
+                        "//button[contains(text(), 'Accept')]",
+                        "//button[contains(text(), 'Aceitar')]",
+                        "//button[contains(text(), 'OK')]"
+                    ]
+                    for selector in cookie_selectors:
+                        try:
+                            if selector.startswith('//'):
+                                elements = self.driver.find_elements(By.XPATH, selector)
+                            else:
+                                elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                            if elements:
+                                element = WebDriverWait(self.driver, 5).until(EC.element_to_be_clickable(elements[0]))
+                                element.click()
+                                logger.info("Clicked cookie/accept button")
+                                time.sleep(2)
+                                break
+                        except:
+                            continue
+                except Exception as cookie_error:
+                    logger.debug(f"No cookie consent found or error: {cookie_error}")
                 
                 # Switch to English if needed
                 try:
@@ -953,15 +1002,35 @@ class BacBoScraper:
             # Wait for the betting statistics section to load
             time.sleep(10)  # Give page more time to load dynamic content
             
+            # Diagnostic: Check what's actually on the page
+            try:
+                page_text = self.driver.find_element(By.TAG_NAME, "body").text[:1000]
+                logger.info(f"Page text sample (first 1000 chars): {page_text[:500]}")
+                page_source_length = len(self.driver.page_source)
+                logger.info(f"Page source length: {page_source_length} characters")
+                
+                # Check for common error indicators
+                if any(indicator in page_text.lower() for indicator in ['error', '404', 'not found', 'access denied', 'blocked']):
+                    logger.error(f"Page appears to have an error. Text sample: {page_text[:200]}")
+                    raise Exception(f"Page shows error: {page_text[:200]}")
+            except Exception as diag_error:
+                logger.error(f"Error during page diagnostics: {diag_error}")
+            
             # Try to wait for specific elements that might contain statistics
             try:
                 # Wait for any element containing percentage
-                WebDriverWait(self.driver, 10).until(
+                WebDriverWait(self.driver, 15).until(
                     lambda d: '%' in d.find_element(By.TAG_NAME, "body").text
                 )
-                logger.info("Page contains percentage symbols")
-            except:
-                logger.warning("Page might not have loaded percentages yet")
+                logger.info("✅ Page contains percentage symbols")
+            except Exception as wait_error:
+                logger.warning(f"Page might not have loaded percentages yet: {wait_error}")
+                # Try to see what text is actually on the page
+                try:
+                    body_text = self.driver.find_element(By.TAG_NAME, "body").text
+                    logger.info(f"Body text length: {len(body_text)}, sample: {body_text[:300]}")
+                except:
+                    logger.error("Could not even get body text - page may not be loaded")
             
             # PRIMARY METHOD: Use OCR to extract from screenshot (most reliable)
             logger.info("Attempting OCR extraction from screenshot...")
@@ -979,11 +1048,31 @@ class BacBoScraper:
                 logger.info(f"Successfully extracted stats from main page: {stats}")
                 return stats
             
+            # Wait longer for dynamic content that might load via JavaScript
+            logger.info("Waiting for dynamic content to load...")
+            time.sleep(5)
+            
+            # Try to wait for iframes to appear (they might load dynamically)
+            try:
+                WebDriverWait(self.driver, 20).until(
+                    lambda d: len(d.find_elements(By.TAG_NAME, "iframe")) > 0
+                )
+                logger.info("Iframes detected after waiting")
+            except:
+                logger.info("No iframes detected or they didn't load in time")
+            
             # If not found, try to find and switch to iframe
             # Casino games often load in iframes
             try:
                 iframes = self.driver.find_elements(By.TAG_NAME, "iframe")
                 logger.info(f"Found {len(iframes)} iframe(s)")
+                
+                # Also check for any nested iframes or shadow DOM
+                if len(iframes) == 0:
+                    logger.info("No iframes found, checking for shadow DOM or other containers...")
+                    # Try to find game containers
+                    game_containers = self.driver.find_elements(By.CSS_SELECTOR, "[id*='game'], [class*='game'], [id*='bac'], [class*='bac']")
+                    logger.info(f"Found {len(game_containers)} potential game containers")
                 
                 for idx, iframe in enumerate(iframes):
                     try:
@@ -1213,6 +1302,85 @@ class BacBoScraper:
             
             logger.warning("Could not extract betting statistics after all attempts")
             
+            # Capture screenshot for debugging
+            try:
+                screenshot_path = "/tmp/scraper_debug.png"
+                self.driver.save_screenshot(screenshot_path)
+                logger.info(f"Debug screenshot saved to {screenshot_path}")
+            except Exception as screenshot_error:
+                logger.warning(f"Could not save debug screenshot: {screenshot_error}")
+            
+            # Try JavaScript-based detection as last resort
+            try:
+                logger.info("Attempting JavaScript-based detection...")
+                js_result = self.driver.execute_script("""
+                    // Try to find any elements with percentages
+                    var allElements = document.querySelectorAll('*');
+                    var found = {
+                        player: [],
+                        banker: [],
+                        tie: [],
+                        allTexts: []
+                    };
+                    
+                    for (var i = 0; i < allElements.length; i++) {
+                        var elem = allElements[i];
+                        var text = elem.innerText || elem.textContent || '';
+                        if (text && text.length > 0 && text.length < 500) {
+                            var upper = text.toUpperCase();
+                            var matches = text.match(/(\\d+)%/g);
+                            
+                            if (matches) {
+                                if (upper.includes('JOGADOR') || upper.includes('PLAYER')) {
+                                    matches.forEach(m => {
+                                        var num = parseInt(m);
+                                        if (num >= 0 && num <= 100) found.player.push(num);
+                                    });
+                                }
+                                if (upper.includes('BANCA') || upper.includes('BANKER')) {
+                                    matches.forEach(m => {
+                                        var num = parseInt(m);
+                                        if (num >= 0 && num <= 100) found.banker.push(num);
+                                    });
+                                }
+                                if (upper.includes('EMPATE') || upper.includes('TIE')) {
+                                    matches.forEach(m => {
+                                        var num = parseInt(m);
+                                        if (num >= 0 && num <= 100) found.tie.push(num);
+                                    });
+                                }
+                            }
+                        }
+                    }
+                    
+                    return found;
+                """)
+                
+                if js_result:
+                    logger.info(f"JavaScript detection found: {js_result}")
+                    player_vals = js_result.get('player', [])
+                    banker_vals = js_result.get('banker', [])
+                    tie_vals = js_result.get('tie', [])
+                    
+                    if player_vals and banker_vals:
+                        player_percent = max(set(player_vals), key=player_vals.count) if player_vals else None
+                        banker_percent = max(set(banker_vals), key=banker_vals.count) if banker_vals else None
+                        tie_percent = max(set(tie_vals), key=tie_vals.count) if tie_vals else (100 - (player_percent or 0) - (banker_percent or 0))
+                        
+                        if player_percent is not None and banker_percent is not None:
+                            stats = {
+                                'player_percent': player_percent,
+                                'banker_percent': banker_percent,
+                                'tie_percent': tie_percent if tie_percent >= 0 else 0,
+                                'player_winning': player_percent > 50,
+                                'timestamp': time.time(),
+                                'extraction_method': 'javascript_fallback'
+                            }
+                            logger.info(f"✅ Successfully extracted stats using JavaScript fallback: {stats}")
+                            return stats
+            except Exception as js_error:
+                logger.error(f"JavaScript detection failed: {js_error}")
+            
             # Try refreshing the page and retrying once
             try:
                 logger.info("Attempting page refresh and retry...")
@@ -1236,6 +1404,16 @@ class BacBoScraper:
             
         except Exception as e:
             logger.error(f"Error getting betting statistics: {e}", exc_info=True)
+            
+            # Log more diagnostic information
+            try:
+                if self.driver:
+                    current_url = self.driver.current_url
+                    page_title = self.driver.title
+                    logger.error(f"Error context - URL: {current_url}, Title: {page_title}")
+            except:
+                pass
+            
             # Try to reinitialize driver if it's a driver-related error
             if 'session' in str(e).lower() or 'driver' in str(e).lower() or 'chrome' in str(e).lower():
                 logger.warning("Driver error detected, attempting to reinitialize...")

@@ -295,9 +295,23 @@ class BacBoTelegramBot:
                     )
             else:
                 if language == 'pt':
-                    message = "⚠️ Não foi possível obter estatísticas do jogo.\n\nO bot continua monitorando..."
+                    message = (
+                        "⚠️ Não foi possível obter estatísticas do jogo.\n\n"
+                        "Possíveis causas:\n"
+                        "• Site pode estar bloqueando acesso automatizado\n"
+                        "• Página pode não estar carregando completamente\n"
+                        "• Conteúdo do jogo pode estar em iframe não detectado\n\n"
+                        "O bot continua monitorando..."
+                    )
                 else:
-                    message = "⚠️ Could not retrieve game statistics.\n\nThe bot continues monitoring..."
+                    message = (
+                        "⚠️ Could not retrieve game statistics.\n\n"
+                        "Possible causes:\n"
+                        "• Site may be blocking automated access\n"
+                        "• Page may not be loading completely\n"
+                        "• Game content may be in undetected iframe\n\n"
+                        "The bot continues monitoring..."
+                    )
             
             _run_async(self.bot.send_message(chat_id=self.chat_id, text=message))
             return True
