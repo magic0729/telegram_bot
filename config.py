@@ -21,6 +21,15 @@ PLAYER_WIN_THRESHOLD = 98  # percentage threshold for sending alerts
 DEFAULT_LANGUAGE = 'en'  # 'en' for English, 'pt' for Portuguese
 
 # Selenium Configuration
-HEADLESS = False  # Set to False to see browser window (changed for debugging)
+# Auto-detect production environment (Railway/Heroku sets PORT env var)
+# In production, always use headless mode
+_is_production = "PORT" in os.environ or os.environ.get("FLASK_ENV") == "production"
+# In production, force headless=True. Otherwise, use HEADLESS env var or default to False
+HEADLESS = True if _is_production else (os.getenv("HEADLESS", "False").lower() == "true")
 WAIT_TIMEOUT = 30  # seconds to wait for elements to load
+
+# Log configuration for debugging (only import logging if needed)
+if _is_production:
+    import logging
+    logging.info(f"Production mode detected: HEADLESS={HEADLESS}, PORT env exists: {'PORT' in os.environ}")
 

@@ -62,11 +62,19 @@ class BacBoScraper:
         chrome_options.add_experimental_option('useAutomationExtension', False)
         # Use a more modern and realistic user agent
         chrome_options.add_argument('--user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
-        # Additional stealth options
+        # Additional stealth options to avoid detection
         chrome_options.add_argument('--disable-web-security')
         chrome_options.add_argument('--allow-running-insecure-content')
         chrome_options.add_argument('--disable-features=IsolateOrigins,site-per-process')
         chrome_options.add_argument('--disable-site-isolation-trials')
+        # Additional anti-detection options
+        chrome_options.add_argument('--disable-infobars')
+        chrome_options.add_argument('--disable-notifications')
+        chrome_options.add_argument('--lang=en-US,en')
+        chrome_options.add_argument('--accept-lang=en-US,en')
+        # Reduce fingerprinting
+        chrome_options.add_argument('--disable-plugins-discovery')
+        chrome_options.add_argument('--disable-default-apps')
         
         # Additional options for Railway/Linux environments
         if platform.system() != 'Windows':
@@ -79,11 +87,18 @@ class BacBoScraper:
             chrome_options.add_argument('--disable-renderer-backgrounding')
             chrome_options.add_argument('--disable-features=TranslateUI')
             chrome_options.add_argument('--disable-ipc-flooding-protection')
-            chrome_options.add_argument('--remote-debugging-port=9222')
+            # Use a non-standard remote debugging port to avoid conflicts
+            chrome_options.add_argument('--remote-debugging-port=0')  # Use random port
             chrome_options.add_argument('--window-size=1920,1080')
             chrome_options.add_argument('--start-maximized')
             # Set up Chrome to run in containerized environment
             chrome_options.add_argument('--disable-features=VizDisplayCompositor')
+            # Additional production-specific options
+            chrome_options.add_argument('--no-first-run')
+            chrome_options.add_argument('--no-default-browser-check')
+            chrome_options.add_argument('--disable-popup-blocking')
+            chrome_options.add_argument('--disable-translate')
+            chrome_options.add_argument('--disable-background-networking')
             # Try to use Chrome binary if available in common locations
             chrome_binary_paths = [
                 '/usr/bin/google-chrome',
@@ -101,8 +116,22 @@ class BacBoScraper:
         # correct driver for the installed browser and OS.
         try:
             self.driver = webdriver.Chrome(options=chrome_options)
+            # Additional stealth scripts to avoid detection
             self.driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+            self.driver.execute_cdp_cmd('Network.setUserAgentOverride', {
+                "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            })
+            # Hide automation indicators
+            self.driver.execute_cdp_cmd('Page.addScriptToEvaluateOnNewDocument', {
+                'source': '''
+                    Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+                    Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]});
+                    Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']});
+                    window.chrome = {runtime: {}};
+                '''
+            })
             logger.info("Using Selenium Manager for ChromeDriver (auto-managed)")
+            logger.info(f"Headless mode: {effective_headless}, Platform: {platform.system()}")
             return
         except Exception as selenium_manager_error:
             logger.warning(f"Selenium Manager failed, falling back to webdriver-manager: {selenium_manager_error}")
@@ -280,8 +309,25 @@ class BacBoScraper:
             
             service = Service(driver_path)
             self.driver = webdriver.Chrome(service=service, options=chrome_options)
+            # Additional stealth scripts to avoid detection
             self.driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+            try:
+                self.driver.execute_cdp_cmd('Network.setUserAgentOverride', {
+                    "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                })
+                # Hide automation indicators
+                self.driver.execute_cdp_cmd('Page.addScriptToEvaluateOnNewDocument', {
+                    'source': '''
+                        Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+                        Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]});
+                        Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']});
+                        window.chrome = {runtime: {}};
+                    '''
+                })
+            except Exception as cdp_error:
+                logger.warning(f"CDP commands failed (may not be available): {cdp_error}")
             logger.info("Using webdriver-manager fallback for ChromeDriver")
+            logger.info(f"Headless mode: {effective_headless}, Platform: {platform.system()}")
             return
         except Exception as e:
             logger.error(f"webdriver-manager fallback failed: {e}", exc_info=True)
@@ -334,18 +380,23 @@ class BacBoScraper:
     def start(self):
         """Start the browser and navigate to the game page"""
         if self.driver is None:
+            logger.info("Initializing Chrome driver...")
             self._setup_driver()
+            logger.info("Chrome driver initialized successfully")
         
         max_retries = 3
         for attempt in range(max_retries):
             try:
                 logger.info(f"Navigating to {self.url} (attempt {attempt + 1}/{max_retries})")
+                logger.info(f"Current driver state: driver exists={self.driver is not None}")
                 
                 # Set page load timeout
                 self.driver.set_page_load_timeout(60)  # 60 seconds timeout
                 
                 # Navigate to URL
+                logger.info(f"Loading URL: {self.url}")
                 self.driver.get(self.url)
+                logger.info(f"Page load initiated, waiting for completion...")
                 
                 # Wait for page to be interactive
                 WebDriverWait(self.driver, 30).until(
@@ -426,17 +477,45 @@ class BacBoScraper:
                 return
                 
             except Exception as e:
-                logger.error(f"Error navigating to page (attempt {attempt + 1}/{max_retries}): {e}")
+                error_msg = str(e)
+                logger.error(f"Error navigating to page (attempt {attempt + 1}/{max_retries}): {error_msg}")
+                logger.error(f"Error type: {type(e).__name__}")
+                
+                # Log additional diagnostics
+                try:
+                    if self.driver:
+                        current_url = self.driver.current_url
+                        page_title = self.driver.title
+                        logger.error(f"Current URL after error: {current_url}")
+                        logger.error(f"Page title: {page_title}")
+                except Exception as diag_error:
+                    logger.error(f"Could not get diagnostics: {diag_error}")
+                
                 if attempt < max_retries - 1:
                     logger.info(f"Retrying in 5 seconds...")
                     time.sleep(5)
                     try:
                         if self.driver:
-                            self.driver.refresh()
-                    except:
-                        pass
+                            # Try to close and recreate driver if it seems broken
+                            if 'session' in error_msg.lower() or 'timeout' in error_msg.lower():
+                                logger.warning("Driver session appears broken, recreating...")
+                                try:
+                                    self.driver.quit()
+                                except:
+                                    pass
+                                self.driver = None
+                                self._setup_driver()
+                            else:
+                                self.driver.refresh()
+                    except Exception as retry_error:
+                        logger.error(f"Error during retry preparation: {retry_error}")
                 else:
                     logger.error(f"Failed to load page after {max_retries} attempts")
+                    logger.error("This might indicate:")
+                    logger.error("1. Network connectivity issues in production")
+                    logger.error("2. Site blocking automated access")
+                    logger.error("3. Chrome/ChromeDriver compatibility issues")
+                    logger.error("4. Missing dependencies in production environment")
                     raise
         
     def _extract_stats_from_context(self, driver_context, player_candidates=None, banker_candidates=None, tie_candidates=None) -> Optional[Dict]:
