@@ -251,9 +251,9 @@ class BacBoTelegramBot:
     def send_startup_message(self, language: str = 'en') -> bool:
         """Send bot startup notification"""
         if language == 'pt':
-            message = "🤖 Bot Bac Bo iniciado!\n\n📊 Monitorando o jogo...\n⏱️ Intervalo de verificação: 5 segundos\n🎯 Limite de alerta: Player > 50%"
+            message = "🤖 Bot Bac Bo iniciado!\n\n📊 Monitorando o jogo...\n⏱️ Intervalo de verificação: 5 segundos\n🎯 Limite de alerta: Player > 98%"
         else:
-            message = "🤖 Bac Bo Bot Started!\n\n📊 Monitoring game...\n⏱️ Check interval: 5 seconds\n🎯 Alert threshold: Player > 50%"
+            message = "🤖 Bac Bo Bot Started!\n\n📊 Monitoring game...\n⏱️ Check interval: 5 seconds\n🎯 Alert threshold: Player > 98%"
         
         return self.send_message(message)
     

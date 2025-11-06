@@ -15,7 +15,7 @@ BAC_BO_URL = 'https://www.vemabet10.com/pt/game/bac-bo/play-for-real'
 
 # Scraping Configuration
 SCRAPE_INTERVAL = 5  # seconds between scraping attempts
-PLAYER_WIN_THRESHOLD = 50  # percentage threshold for sending alerts
+PLAYER_WIN_THRESHOLD = 98  # percentage threshold for sending alerts
 
 # Language Configuration
 DEFAULT_LANGUAGE = 'en'  # 'en' for English, 'pt' for Portuguese

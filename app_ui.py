@@ -130,6 +130,41 @@ if __name__ == "__main__":
     # For local dev: python app_ui.py
     # For production: Railway/Heroku will set PORT environment variable
     import os
-    port = int(os.environ.get("PORT", 8000))
+    import socket
+    
+    def find_free_port(start_port=5000, max_attempts=10):
+        """Find a free port starting from start_port"""
+        for i in range(max_attempts):
+            port = start_port + i
+            try:
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                    s.bind(('127.0.0.1', port))
+                    return port
+            except OSError:
+                continue
+        raise RuntimeError(f"Could not find a free port starting from {start_port}")
+    
+    # Use PORT env var if set, otherwise find a free port
+    if "PORT" in os.environ:
+        port = int(os.environ.get("PORT", 5000))
+    else:
+        port = find_free_port(5000)
+    
     debug = os.environ.get("FLASK_ENV") != "production"
-    app.run(host="0.0.0.0", port=port, debug=debug, use_reloader=False)
+    
+    try:
+        print(f"Starting Flask app on http://127.0.0.1:{port}")
+        app.run(host="127.0.0.1", port=port, debug=debug, use_reloader=False)
+    except OSError as e:
+        if "access permissions" in str(e).lower() or "permission denied" in str(e).lower():
+            print(f"Error: Port {port} requires elevated permissions or is already in use.")
+            print(f"Trying alternative port...")
+            try:
+                alt_port = find_free_port(5000)
+                print(f"Starting Flask app on http://127.0.0.1:{alt_port}")
+                app.run(host="127.0.0.1", port=alt_port, debug=debug, use_reloader=False)
+            except Exception as e2:
+                print(f"Failed to start server: {e2}")
+                print("Please try running with a different port or check if another process is using the port.")
+        else:
+            raise
