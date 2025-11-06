@@ -47,6 +47,8 @@ class BacBoBot:
         self.alert_cooldown = 30  # seconds between alerts
         self.last_stats_sent = None  # Track last stats sent to Telegram
         self._stop = False
+        self.last_error_message_time = 0  # Track when we last sent error message
+        self.error_message_cooldown = 300  # 5 minutes between error messages
         
     def _should_send_alert(self, stats: dict) -> bool:
         """Determine if we should send an alert based on stats"""
@@ -83,8 +85,15 @@ class BacBoBot:
             
             if not stats:
                 logger.warning("Could not retrieve betting statistics")
-                # Send status update even if stats can't be retrieved
-                self.telegram_bot.send_status_update(stats=None, language=self.language)
+                # Only send error message once per cooldown period to avoid spam
+                current_time = time.time()
+                if current_time - self.last_error_message_time > self.error_message_cooldown:
+                    # Send status update even if stats can't be retrieved
+                    self.telegram_bot.send_status_update(stats=None, language=self.language)
+                    self.last_error_message_time = current_time
+                    logger.info("Sent error message to Telegram (cooldown applied)")
+                else:
+                    logger.debug(f"Skipping error message (cooldown: {self.error_message_cooldown}s)")
                 return False
             
             logger.info(

@@ -60,7 +60,13 @@ class BacBoScraper:
         chrome_options.add_argument('--disable-blink-features=AutomationControlled')
         chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
         chrome_options.add_experimental_option('useAutomationExtension', False)
-        chrome_options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
+        # Use a more modern and realistic user agent
+        chrome_options.add_argument('--user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
+        # Additional stealth options
+        chrome_options.add_argument('--disable-web-security')
+        chrome_options.add_argument('--allow-running-insecure-content')
+        chrome_options.add_argument('--disable-features=IsolateOrigins,site-per-process')
+        chrome_options.add_argument('--disable-site-isolation-trials')
         
         # Additional options for Railway/Linux environments
         if platform.system() != 'Windows':
@@ -330,12 +336,59 @@ class BacBoScraper:
         if self.driver is None:
             self._setup_driver()
         
-        logger.info(f"Navigating to {self.url}")
-        self.driver.get(self.url)
-        time.sleep(5)  # Wait for page to load
-        
-        # Switch to English if needed
-        self._switch_language('en')
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                logger.info(f"Navigating to {self.url} (attempt {attempt + 1}/{max_retries})")
+                
+                # Set page load timeout
+                self.driver.set_page_load_timeout(60)  # 60 seconds timeout
+                
+                # Navigate to URL
+                self.driver.get(self.url)
+                
+                # Wait for page to be interactive
+                WebDriverWait(self.driver, 30).until(
+                    lambda d: d.execute_script('return document.readyState') == 'complete'
+                )
+                
+                logger.info("Page loaded successfully")
+                
+                # Wait additional time for dynamic content
+                time.sleep(10)  # Increased wait time for dynamic content
+                
+                # Verify page actually loaded by checking title or URL
+                current_url = self.driver.current_url
+                page_title = self.driver.title
+                logger.info(f"Current URL: {current_url}, Page title: {page_title[:100] if page_title else 'None'}")
+                
+                # Check if we're on the right page (not error page)
+                page_text = self.driver.find_element(By.TAG_NAME, "body").text[:500]
+                if 'error' in page_text.lower() and '404' in page_text.lower():
+                    raise Exception(f"Page returned error: {page_text[:200]}")
+                
+                # Switch to English if needed
+                try:
+                    self._switch_language('en')
+                except Exception as lang_error:
+                    logger.warning(f"Could not switch language: {lang_error}")
+                
+                logger.info("✅ Successfully navigated to game page")
+                return
+                
+            except Exception as e:
+                logger.error(f"Error navigating to page (attempt {attempt + 1}/{max_retries}): {e}")
+                if attempt < max_retries - 1:
+                    logger.info(f"Retrying in 5 seconds...")
+                    time.sleep(5)
+                    try:
+                        if self.driver:
+                            self.driver.refresh()
+                    except:
+                        pass
+                else:
+                    logger.error(f"Failed to load page after {max_retries} attempts")
+                    raise
         
     def _extract_stats_from_context(self, driver_context, player_candidates=None, banker_candidates=None, tie_candidates=None) -> Optional[Dict]:
         """Extract statistics from current driver context (main page or iframe)"""
@@ -870,10 +923,33 @@ class BacBoScraper:
         Extract betting statistics from the page
         Returns dict with player_percent, banker_percent, tie_percent, and other data
         """
-        if self.driver is None:
-            self.start()
-        
         try:
+            # Check if driver is valid
+            if self.driver is None:
+                logger.info("Driver is None, initializing...")
+                self.start()
+            
+            # Verify driver is still valid
+            try:
+                # Try to get current URL to verify driver is working
+                current_url = self.driver.current_url
+                logger.debug(f"Driver is valid, current URL: {current_url}")
+            except Exception as driver_error:
+                logger.error(f"Driver is invalid: {driver_error}, reinitializing...")
+                # Close old driver
+                try:
+                    self.driver.quit()
+                except:
+                    pass
+                self.driver = None
+                self.start()
+            
+            # Verify we're on the correct page
+            current_url = self.driver.current_url
+            if 'vemabet10.com' not in current_url and 'bac-bo' not in current_url.lower():
+                logger.warning(f"Not on correct page, current URL: {current_url}, navigating...")
+                self.start()
+            
             # Wait for the betting statistics section to load
             time.sleep(10)  # Give page more time to load dynamic content
             
@@ -1136,10 +1212,40 @@ class BacBoScraper:
                 pass
             
             logger.warning("Could not extract betting statistics after all attempts")
+            
+            # Try refreshing the page and retrying once
+            try:
+                logger.info("Attempting page refresh and retry...")
+                self.driver.refresh()
+                time.sleep(15)  # Wait longer after refresh
+                
+                # Try extraction again after refresh
+                stats = self._extract_stats_from_screenshot()
+                if stats:
+                    logger.info(f"✅ Successfully extracted stats after refresh using OCR: {stats}")
+                    return stats
+                
+                stats = self._extract_stats_from_context(self.driver)
+                if stats:
+                    logger.info(f"✅ Successfully extracted stats after refresh from HTML: {stats}")
+                    return stats
+            except Exception as refresh_error:
+                logger.error(f"Error during refresh retry: {refresh_error}")
+            
             return None
             
         except Exception as e:
             logger.error(f"Error getting betting statistics: {e}", exc_info=True)
+            # Try to reinitialize driver if it's a driver-related error
+            if 'session' in str(e).lower() or 'driver' in str(e).lower() or 'chrome' in str(e).lower():
+                logger.warning("Driver error detected, attempting to reinitialize...")
+                try:
+                    if self.driver:
+                        self.driver.quit()
+                except:
+                    pass
+                self.driver = None
+                # Don't retry immediately to avoid infinite loop, just return None
             return None
     
     def refresh(self):
