@@ -1,8 +1,21 @@
 from flask import Flask, request, jsonify, Response
 import threading
 import time
+import logging
 from typing import Optional
-from bot import BacBoBot
+
+# Configure logging for better debugging in production
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+try:
+    from bot import BacBoBot
+except ImportError as e:
+    logger.error(f"Failed to import bot module: {e}")
+    BacBoBot = None
 
 app = Flask(__name__)
 
@@ -79,6 +92,9 @@ def index() -> Response:
 
 @app.post("/start")
 def start_bot():
+    if BacBoBot is None:
+        return jsonify({"ok": False, "message": "Bot module not available. Check server logs."}), 500
+    
     payload = request.get_json(force=True, silent=True) or {}
     token = payload.get("token")
     chat_id = payload.get("chatId")
@@ -86,14 +102,18 @@ def start_bot():
         return jsonify({"ok": False, "message": "token and chatId are required"}), 400
 
     global _bot_thread, _bot_instance
-    with _bot_lock:
-        if _bot_thread and _bot_thread.is_alive():
-            return jsonify({"ok": True, "message": "Bot already running"})
-        _bot_instance = BacBoBot(token=token, chat_id=chat_id)
-        _bot_instance._stop = False
-        _bot_thread = threading.Thread(target=_bot_instance.run, daemon=True)
-        _bot_thread.start()
-    return jsonify({"ok": True, "message": "Bot starting..."})
+    try:
+        with _bot_lock:
+            if _bot_thread and _bot_thread.is_alive():
+                return jsonify({"ok": True, "message": "Bot already running"})
+            _bot_instance = BacBoBot(token=token, chat_id=chat_id)
+            _bot_instance._stop = False
+            _bot_thread = threading.Thread(target=_bot_instance.run, daemon=True)
+            _bot_thread.start()
+        return jsonify({"ok": True, "message": "Bot starting..."})
+    except Exception as e:
+        logger.error(f"Error starting bot: {e}", exc_info=True)
+        return jsonify({"ok": False, "message": f"Failed to start bot: {str(e)}"}), 500
 
 
 @app.post("/stop")
@@ -126,45 +146,77 @@ def status():
     return jsonify(_bot_instance.status())
 
 
+@app.get("/health")
+def health():
+    """Health check endpoint for Railway"""
+    return jsonify({"status": "ok", "service": "bac-bo-bot"}), 200
+
+
 if __name__ == "__main__":
     # For local dev: python app_ui.py
     # For production: Railway/Heroku will set PORT environment variable
     import os
     import socket
+    import sys
     
     def find_free_port(start_port=5000, max_attempts=10):
         """Find a free port starting from start_port"""
         for i in range(max_attempts):
-            port = start_port + i
+            test_port = start_port + i
             try:
                 with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                    s.bind(('127.0.0.1', port))
-                    return port
+                    s.bind(('127.0.0.1', test_port))
+                    return test_port
             except OSError:
                 continue
         raise RuntimeError(f"Could not find a free port starting from {start_port}")
     
-    # Use PORT env var if set, otherwise find a free port
-    if "PORT" in os.environ:
-        port = int(os.environ.get("PORT", 5000))
-    else:
-        port = find_free_port(5000)
-    
-    debug = os.environ.get("FLASK_ENV") != "production"
-    
     try:
-        print(f"Starting Flask app on http://127.0.0.1:{port}")
-        app.run(host="127.0.0.1", port=port, debug=debug, use_reloader=False)
+        # Determine if we're in production (Railway/Heroku sets PORT)
+        is_production = "PORT" in os.environ
+        
+        # Use PORT env var if set (Railway/Heroku), otherwise find a free port for local dev
+        if is_production:
+            port = int(os.environ.get("PORT", 5000))
+            host = "0.0.0.0"  # Must bind to 0.0.0.0 for external connections in production
+        else:
+            port = find_free_port(5000)
+            host = "127.0.0.1"  # Localhost for local development
+        
+        debug = os.environ.get("FLASK_ENV") != "production"
+        
+        logger.info("=" * 50)
+        logger.info("Bac Bo Bot Web UI Starting")
+        logger.info(f"Host: {host}")
+        logger.info(f"Port: {port}")
+        logger.info(f"Production mode: {is_production}")
+        logger.info(f"Debug: {debug}")
+        logger.info(f"Bot module available: {BacBoBot is not None}")
+        logger.info("=" * 50)
+        
+        app.run(host=host, port=port, debug=debug, use_reloader=False)
     except OSError as e:
         if "access permissions" in str(e).lower() or "permission denied" in str(e).lower():
-            print(f"Error: Port {port} requires elevated permissions or is already in use.")
-            print(f"Trying alternative port...")
-            try:
-                alt_port = find_free_port(5000)
-                print(f"Starting Flask app on http://127.0.0.1:{alt_port}")
-                app.run(host="127.0.0.1", port=alt_port, debug=debug, use_reloader=False)
-            except Exception as e2:
-                print(f"Failed to start server: {e2}")
-                print("Please try running with a different port or check if another process is using the port.")
+            if is_production:
+                # In production, we can't try alternative ports - fail fast
+                logger.error(f"Error: Port {port} requires elevated permissions or is already in use.")
+                logger.error("This is a production deployment issue. Check Railway logs for more details.")
+                sys.exit(1)
+            else:
+                # Local dev: try alternative port
+                logger.warning(f"Error: Port {port} requires elevated permissions or is already in use.")
+                logger.info("Trying alternative port...")
+                try:
+                    alt_port = find_free_port(5000)
+                    logger.info(f"Starting Flask app on http://{host}:{alt_port}")
+                    app.run(host=host, port=alt_port, debug=debug, use_reloader=False)
+                except Exception as e2:
+                    logger.error(f"Failed to start server: {e2}", exc_info=True)
+                    logger.error("Please try running with a different port or check if another process is using the port.")
+                    sys.exit(1)
         else:
-            raise
+            logger.error(f"OSError starting server: {e}", exc_info=True)
+            sys.exit(1)
+    except Exception as e:
+        logger.error(f"Fatal error starting application: {e}", exc_info=True)
+        sys.exit(1)
